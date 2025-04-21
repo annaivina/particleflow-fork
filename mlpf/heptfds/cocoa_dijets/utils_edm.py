@@ -2,8 +2,9 @@ import awkward as ak
 import fastjet
 import numpy as np
 import vector
+import re
 
-jetdef = fastjet.JetDefinition(fastjet.ee_genkt_algorithm, 0.7, -1.0)
+jetdef = fastjet.JetDefinition(fastjet.antikt_algorithm, 0.4)
 min_jet_pt = 5.0  # GeV
 
 # from fcc/postprocessing.py
@@ -49,8 +50,13 @@ Y_FEATURES = ["PDG", "charge", "pt", "eta", "sin_phi", "cos_phi", "energy", "jet
 labels = [0, 211, 130, 22, 11, 13]
 
 
-def split_sample(path, test_frac=0.8):
-    files = sorted(list(path.glob("*.parquet")))
+def extract_number(filename):
+    match = re.search(r'\d+', filename.name)
+    return int(match.group()) if match else 0
+
+
+def split_sample(path, test_frac=0.7):
+    files = sorted(list(path.glob("*.parquet")), key=extract_number)
     print("Found {} files in {}".format(len(files), path))
     assert len(files) > 0
     idx_split = int(test_frac * len(files))
@@ -63,7 +69,6 @@ def split_sample(path, test_frac=0.8):
         "test": generate_examples(files_test),
     }
 
-
 def split_sample_test(path):
     files = sorted(list(path.glob("*.parquet")))
     print("Found {} files in {}".format(len(files), path))
@@ -72,6 +77,26 @@ def split_sample_test(path):
     assert len(files_test) > 0
     return {
         "test": generate_examples(files_test)
+    }
+
+def split_sample_train(path):
+    files = sorted(list(path.glob("*.parquet")))
+    print("Found {} files in {}".format(len(files), path))
+    assert len(files) > 0
+    files_train = files
+    assert len(files_train) > 0
+    return {
+        "train": generate_examples(files_train)
+    }
+
+def split_sample_valid(path):
+    files = sorted(list(path.glob("*.parquet")))
+    print("Found {} files in {}".format(len(files), path))
+    assert len(files) > 0
+    files_valid = files
+    assert len(files_valid) > 0
+    return {
+        "validation": generate_examples(files_valid)
     }
 
 def split_sample_several(paths, test_frac=0.8):
@@ -95,7 +120,7 @@ def split_sample_several(paths, test_frac=0.8):
     }
 
 
-def prepare_data_clic(fn, with_jet_idx=True):
+def prepare_data_cocoa(fn, with_jet_idx=True):
     ret = ak.from_parquet(fn)
 
     X_track = ret["X_track"]
@@ -109,8 +134,8 @@ def prepare_data_clic(fn, with_jet_idx=True):
     ycands = []
     passed_event_ids = []
     
-    event_ids = ak.to_numpy(ret["event_id"])
     file_ids = ak.to_numpy(ret["file_id"])
+    event_ids = ak.to_numpy(ret["event_id"])
     
     for iev in range(nev):
 
@@ -124,7 +149,7 @@ def prepare_data_clic(fn, with_jet_idx=True):
         ygen_cluster = ak.to_numpy(ret["ygen_cluster"][iev])
         ycand_track = ak.to_numpy(ret["ycand_track"][iev])
         ycand_cluster = ak.to_numpy(ret["ycand_cluster"][iev])
-
+        
         if len(ygen_track) == 0 or len(ygen_cluster) == 0:
             continue
             
@@ -205,19 +230,19 @@ def prepare_data_clic(fn, with_jet_idx=True):
         Xs.append(X)
         ygens.append(ygen)
         ycands.append(ycand)
-    return Xs, ygens, ycands, file_ids, passed_event_ids
+    return Xs, ygens, ycands,file_ids, passed_event_ids
 
 
 def generate_examples(files, with_jet_idx=True):
     for fi in files:
-        Xs, ygens, ycands, file_ids, event_ids = prepare_data_clic(fi, with_jet_idx=with_jet_idx)
+        Xs, ygens, ycands, file_ids, event_ids = prepare_data_cocoa(fi, with_jet_idx=with_jet_idx)
         for iev in range(len(Xs)):
             yield str(fi) + "_" + str(iev), {
                 "X": Xs[iev].astype(np.float32),
                 "ygen": ygens[iev],
                 "ycand": ycands[iev],
                 "file_id": file_ids[iev],
-                "event_id": event_ids[iev],
+                "event_id": event_ids[iev]
             }
 
 

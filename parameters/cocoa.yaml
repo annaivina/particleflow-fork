@@ -1,9 +1,9 @@
 backend: tensorflow
 
-cache: caches/clic
+cache: caches/cocoa
 
 dataset:
-  schema: clic
+  schema: cocoa
   target_particles: gen
   num_input_features: 17
   #(none=0, track=1, cluster=2)
@@ -52,7 +52,7 @@ setup:
   weights:
   weights_config:
   lr: 0.001
-  num_epochs: 300
+  num_epochs: 100
   dtype: float32
   trainable:
   lr_schedule: cosinedecay # cosinedecay, exponentialdecay, onecycle, none
@@ -92,7 +92,7 @@ onecycle:
 
 parameters:
   model: gnn_dense
-  input_encoding: clic
+  input_encoding: cocoa
   node_update_mode: additive
   do_node_encoding: yes
   node_encoding_hidden_dim: 256
@@ -210,57 +210,58 @@ train_test_datasets:
     batch_per_gpu: 50
     event_pad_size: -1
     datasets:
-      - clic_edm_qq_pf
-
+      - cocoa_edmjj_clusters_pf
+    
 do_validation_callback: yes
 validation_dataset:
   physical:
     batch_per_gpu: 100
     event_pad_size: -1
     datasets:
-      - clic_edm_qq_pf
+      - cocoa_edmjj_clusters_pf
 
-validation_sets: clic_edm_qq_pf
+validation_sets: cocoa_edmjj_clusters_pf
 validation_batch_size: 100
-validation_num_events: 5000
+validation_num_events: 3900
 
 evaluation_datasets:
-  clic_edm_qq_pf:
-    batch_size: 50
-    num_events: -1
-  clic_edm_ttbar_pf:
-    batch_size: 50
-    num_events: -1
-  clic_edm_ttbar_pu10_pf:
-    batch_size: 50
-    num_events: -1
-  clic_edm_zh_tautau_pf:
-    batch_size: 50
-    num_events: -1
-  clic_edm_ww_fullhad_pf:
-    batch_size: 50
-    num_events: -1
+ cocoa_edmjj_clusters_pf:
+   batch_size: 50
+   num_events: -1
+ cocoattbar_clusters_pf:
+   batch_size: 50
+   num_events: -1
+ cocoa_hbb_boost_clusters_pf:
+   batch_size: 50
+   num_events: -1
+ cocoa_hbb_resolve_clusters_pf:
+   batch_size: 50
+   num_events: -1
+ cocoa_pions_clusters_pf:
+   batch_size: 50
+   num_events: -1
 
-evaluation_jet_algo: ee_genkt_algorithm
+evaluation_jet_algo: antikt_algorithm
 
 datasets:
-  clic_edm_ttbar_pf:
-    version: 1.5.0
+  cocoa_edmjj_clusters_pf:
+    version: 1.7.0
     data_dir:
     manual_dir:
-  clic_edm_ttbar_pu10_pf:
-    version: 1.5.0
+  cocoattbar_clusters_pf:
+    version: 1.7.0
     data_dir:
     manual_dir:
-  clic_edm_qq_pf:
-    version: 1.5.0
+  cocoa_hbb_boost_clusters_pf:
+    version: 1.7.0
     data_dir:
     manual_dir:
-  clic_edm_ww_fullhad_pf:
-    version: 1.5.0
+  cocoa_hbb_resolve_clusters_pf:
+    version: 1.7.0
     data_dir:
     manual_dir:
-  clic_edm_zh_tautau_pf:
-    version: 1.5.0
+  cocoa_pions_clusters_pf:
+    version: 1.7.0
     data_dir:
     manual_dir:
+ 

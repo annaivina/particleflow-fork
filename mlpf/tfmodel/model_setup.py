@@ -164,7 +164,7 @@ def prepare_callbacks(
                 benchmark_dir = outdir
             if config["dataset"]["schema"] == "delphes":
                 bmk_bs = config["train_test_datasets"]["delphes"]["batch_per_gpu"]
-            elif (config["dataset"]["schema"] == "cms") or (config["dataset"]["schema"] == "clic"):
+            elif (config["dataset"]["schema"] == "cms") or (config["dataset"]["schema"] == "clic") or (config["dataset"]["schema"] == "cocoa"):
                 assert (
                     len(config["train_test_datasets"]) == 1
                 ), "Expected exactly 1 key, physical OR delphes, \
@@ -221,7 +221,7 @@ def get_checkpoint_history_callback(outdir, config, dataset, comet_experiment, h
         history_path = str(history_path)
         cb = CustomCallback(
             history_path,
-            dataset.tensorflow_dataset.take(config["validation_num_events"]),
+            dataset.tensorflow_dataset,
             config,
             plot_freq=config["callbacks"]["plot_freq"],
             horovod_enabled=horovod_enabled,
@@ -349,7 +349,7 @@ def eval_model(
     dataset,
     config,
     outdir,
-    jet_ptcut=15.0,
+    jet_ptcut=5.0,
     jet_match_dr=0.1,
     verbose=False,
 ):
@@ -364,7 +364,7 @@ def eval_model(
         raise KeyError("Unknown evaluation_jet_algo: {}".format(config["evaluation_jet_algo"]))
 
     for elem in tqdm(dataset, desc="Evaluating model"):
-
+        
         if verbose:
             print("evaluating model")
         ypred = model.predict(elem["X"], verbose=verbose)
@@ -373,8 +373,11 @@ def eval_model(
         if verbose:
             print("unpacking outputs")
 
-        ygen = unpack_target(elem["ygen"], config["dataset"]["num_output_classes"], config)
-        ycand = unpack_target(elem["ycand"], config["dataset"]["num_output_classes"], config)
+        ygen = [unpack_target(x, config["dataset"]["num_output_classes"], config) for x in elem["ygen"]]
+        ycand = [unpack_target(x, config["dataset"]["num_output_classes"], config) for x in elem["ycand"]]
+        ygen = {k: tf.stack([x[k] for x in ygen]) for k in ygen[0].keys()}
+        ycand = {k: tf.stack([x[k] for x in ycand]) for k in ycand[0].keys()}
+
         # 0, 1, 2 -> -1, 0, 1
         ygen["charge"] = tf.expand_dims(tf.math.argmax(ygen["charge"], axis=-1), axis=-1) - 1
         ycand["charge"] = tf.expand_dims(tf.math.argmax(ycand["charge"], axis=-1), axis=-1) - 1
@@ -384,7 +387,9 @@ def eval_model(
         ypred["cls_id"] = tf.math.argmax(ypred["cls"], axis=-1).numpy()
 
         keys_particle = [k for k in ypred.keys() if k != "met"]
-
+        
+        event_id = elem["event_id"].numpy()
+        file_id = elem["file_id"].numpy()  # Assuming file_id and event_id are stored as tensors
         X = awkward.Array(elem["X"].numpy())
         ygen = awkward.Array({k: squeeze_if_one(ygen[k].numpy()) for k in keys_particle})
         ycand = awkward.Array({k: squeeze_if_one(ycand[k].numpy()) for k in keys_particle})
@@ -451,13 +456,14 @@ def eval_model(
                     "particles": awkvals,
                     "jets": jets_coll,
                     "matched_jets": matched_jets,
+                    "file_id": file_id,
+                    "event_id": event_id,
                 }
             ),
             outfile,
         )
 
         ibatch += 1
-
 
 # https://stackoverflow.com/a/59571639
 def get_nvidia_mem():

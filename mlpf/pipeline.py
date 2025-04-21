@@ -90,6 +90,12 @@ def main():
     type=int,
 )
 @click.option(
+    "--nval",
+    default=None,
+    help="override the number of testing steps",
+    type=int,
+)
+@click.option(
     "--nepochs",
     default=None,
     help="override the number of training epochs",
@@ -162,6 +168,7 @@ def train(
     weights,
     ntrain,
     ntest,
+    nval,
     nepochs,
     recreate,
     prefix,
@@ -273,14 +280,20 @@ def train(
         with open(f"{outdir}/{jobid}.txt", "w") as f:
             f.write(f"{jobid}\n")
 
-    ds_train, ds_test, ds_val = get_train_test_val_datasets(config, num_batches_multiplier, ntrain, ntest, horovod_enabled)
-
+    ds_train, ds_test, ds_val = get_train_test_val_datasets(config, num_batches_multiplier, ntrain, ntest, nval, horovod_enabled)
+    
+    ds_val_callback = mlpf_dataset_from_config(config['validation_sets'],config,"validation",max_events=nval,horovod_enabled=horovod_enabled)
+    ds_val_callback.tensorflow_dataset = ds_val_callback.tensorflow_dataset.padded_batch(config["validation_batch_size"])
+   
     if config["dataset"]["enable_tfds_caching"]:
         ds_train.tensorflow_dataset = ds_train.tensorflow_dataset.cache()
         ds_test.tensorflow_dataset = ds_test.tensorflow_dataset.cache()
+        ds_val.tensorflow_dataset = ds_val.tensorflow_dataset.cache()
+        
 
     ds_train.tensorflow_dataset = ds_train.tensorflow_dataset.prefetch(tf.data.AUTOTUNE)
     ds_test.tensorflow_dataset = ds_test.tensorflow_dataset.prefetch(tf.data.AUTOTUNE)
+    ds_val.tensorflow_dataset = ds_val.tensorflow_dataset.prefetch(tf.data.AUTOTUNE)
 
     if config["dataset"]["enable_tfds_caching"]:
         logging.info("ensuring dataset cache is hot")
@@ -320,7 +333,7 @@ def train(
         callbacks = prepare_callbacks(
             config,
             outdir,
-            ds_val,
+            ds_val_callback,
             comet_experiment=experiment,
             horovod_enabled=horovod_enabled,
             benchmark_dir=benchmark_dir,
@@ -356,11 +369,11 @@ def train(
 
         model.fit(
             ds_train.tensorflow_dataset.repeat(),
-            validation_data=ds_test.tensorflow_dataset.repeat(),
+            validation_data=ds_val.tensorflow_dataset.repeat(),
             epochs=config["setup"]["num_epochs"],
             callbacks=callbacks,
             steps_per_epoch=ds_train.num_steps(),
-            validation_steps=ds_test.num_steps(),
+            validation_steps=ds_val.num_steps(),
             initial_epoch=initial_epoch,
             verbose=1,
         )
@@ -371,7 +384,7 @@ def train(
             callbacks = prepare_callbacks(
                 config,
                 outdir,
-                ds_val,
+                ds_val_callback,
                 comet_experiment=experiment,
                 horovod_enabled=horovod_enabled,
                 benchmark_dir=benchmark_dir,
@@ -406,11 +419,11 @@ def train(
 
             model.fit(
                 ds_train.tensorflow_dataset.repeat(),
-                validation_data=ds_test.tensorflow_dataset.repeat(),
+                validation_data=ds_val.tensorflow_dataset.repeat(),
                 epochs=config["setup"]["num_epochs"],
                 callbacks=callbacks,
                 steps_per_epoch=ds_train.num_steps(),
-                validation_steps=ds_test.num_steps(),
+                validation_steps=ds_val.num_steps(),
                 initial_epoch=initial_epoch,
                 verbose=1,
             )
@@ -472,17 +485,16 @@ def evaluate(config, train_dir, weights, customize, nevents):
 
     for dsname in config["evaluation_datasets"]:
         val_ds = config["evaluation_datasets"][dsname]
-        for split in val_ds["splits"]:
-            ds_test = mlpf_dataset_from_config(
-                dsname,
-                config,
-                split,
-                nevents if nevents >= 0 else val_ds["num_events"],
-            )
-            ds_test_tfds = ds_test.tensorflow_dataset.padded_batch(val_ds["batch_size"])
-            eval_dir = str(Path(train_dir) / "evaluation" / "epoch_{}".format(initial_epoch) / dsname / split)
-            Path(eval_dir).mkdir(parents=True, exist_ok=True)
-            eval_model(model, ds_test_tfds, config, eval_dir)
+        ds_test = mlpf_dataset_from_config(
+            dsname,
+            config,
+            "test",
+            nevents if nevents >= 0 else val_ds["num_events"],
+        )
+        ds_test_tfds = ds_test.tensorflow_dataset.padded_batch(val_ds["batch_size"])
+        eval_dir = str(Path(train_dir) / "evaluation" / "epoch_{}".format(initial_epoch) / dsname)
+        Path(eval_dir).mkdir(parents=True, exist_ok=True)
+        eval_model(model, ds_test_tfds, config, eval_dir)
 
     freeze_model(model, config, train_dir)  # export to ONNX
 
@@ -1287,6 +1299,7 @@ def plots(train_dir, max_files):
         format_dataset_name,
         load_eval_data,
         plot_jet_ratio,
+        plot_jets,
         plot_met,
         plot_met_ratio,
         plot_num_elements,
@@ -1294,14 +1307,16 @@ def plots(train_dir, max_files):
         plot_sum_energy,
         load_loss_history,
         loss_plot,
-        plot_jet_response_binned,
-        plot_met_response_binned,
+#        plot_jet_response_binned,
+#        plot_jet_response_binned_separate,
+#        plot_jet_response_binned_eta,
+#        plot_met_response_binned,
         get_class_names,
         plot_rocs,
         plot_particle_multiplicity,
         compute_3dmomentum_and_ratio,
         plot_3dmomentum_ratio,
-        plot_3dmomentum_response_binned,
+        #plot_3dmomentum_response_binned,
     )
 
     mplhep.set_style(mplhep.styles.CMS)
@@ -1323,93 +1338,91 @@ def plots(train_dir, max_files):
             history[loss].values,
             history["val_" + loss].values,
             loss + ".png",
-            margin=0.5,
+            margin=2,
             smoothing=True,
             cp_dir=Path(train_dir),
             title=loss,
         )
-
     for epoch_dir in sorted(os.listdir(str(eval_dir))):
         eval_epoch_dir = eval_dir / epoch_dir
         for dataset in sorted(os.listdir(str(eval_epoch_dir))):
-            # avoid plotting the single-particle gun samples for now
-            if "_single_" in dataset:
-                logging.info("skipping {}".format(dataset))
-                continue
+            class_names = get_class_names(dataset)
 
-            for split in sorted(os.listdir(str(eval_epoch_dir / dataset))):
-                dataset_dir = eval_epoch_dir / dataset / split
-                print(dataset_dir)
+            _title = format_dataset_name(dataset)
+            dataset_dir = eval_epoch_dir / dataset
+            print(dataset_dir)
+            cp_dir = dataset_dir / "plots"
+            if not os.path.isdir(str(cp_dir)):
+                os.makedirs(str(cp_dir))
+            yvals, X, _ = load_eval_data(str(dataset_dir / "*.parquet"), max_files)
 
-                class_names = get_class_names(dataset)
+            plot_num_elements(X, cp_dir=cp_dir, title=_title)
+            plot_sum_energy(yvals, class_names, cp_dir=cp_dir, title=_title)
+            plot_particle_multiplicity(X, yvals, class_names, cp_dir=cp_dir, title=_title)
+            plot_rocs(yvals, class_names, cp_dir=cp_dir, title=_title)
 
-                _title = format_dataset_name(dataset)
-                cp_dir = dataset_dir / "plots"
-                if not os.path.isdir(str(cp_dir)):
-                    os.makedirs(str(cp_dir))
-                yvals, X, _ = load_eval_data(str(dataset_dir / "*.parquet"), max_files)
+            plot_jets(yvals, cp_dir=cp_dir, title=_title)
 
-                plot_num_elements(X, cp_dir=cp_dir, title=_title)
-                plot_sum_energy(yvals, class_names, cp_dir=cp_dir, title=_title)
-                plot_particle_multiplicity(X, yvals, class_names, cp_dir=cp_dir, title=_title)
-                plot_rocs(yvals, class_names, cp_dir=cp_dir, title=_title)
+            plot_jet_ratio(
+                yvals,
+                cp_dir=cp_dir,
+                title=_title,
+                bins=np.linspace(0, 5, 100),
+                logy=True,
+            )
+            plot_jet_ratio(
+                yvals,
+                cp_dir=cp_dir,
+                title=_title,
+                bins=np.linspace(0.5, 1.5, 100),
+                logy=False,
+                file_modifier="_bins_0p5_1p5",
+            )
 
-                plot_jet_ratio(
-                    yvals,
-                    cp_dir=cp_dir,
-                    title=_title,
-                    bins=np.linspace(0, 5, 100),
-                    logy=True,
-                )
-                plot_jet_ratio(
-                    yvals,
-                    cp_dir=cp_dir,
-                    title=_title,
-                    bins=np.linspace(0.5, 1.5, 100),
-                    logy=False,
-                    file_modifier="_bins_0p5_1p5",
-                )
 
-                met_data = compute_met_and_ratio(yvals)
-                plot_met(met_data, cp_dir=cp_dir, title=_title)
-                plot_met_ratio(
-                    met_data,
-                    cp_dir=cp_dir,
-                    title=_title,
-                    bins=np.linspace(0, 20, 100),
-                    logy=True,
-                )
-                plot_met_ratio(
-                    met_data,
-                    cp_dir=cp_dir,
-                    title=_title,
-                    bins=np.linspace(0, 2, 100),
-                    logy=False,
-                    file_modifier="_bins_0_2",
-                )
-                plot_met_ratio(
-                    met_data,
-                    cp_dir=cp_dir,
-                    title=_title,
-                    bins=np.linspace(0, 5, 100),
-                    logy=False,
-                    file_modifier="_bins_0_5",
-                )
 
-                plot_particles(yvals, cp_dir=cp_dir, title=_title)
+            met_data = compute_met_and_ratio(yvals)
+            plot_met(met_data, cp_dir=cp_dir, title=_title)
 
-                plot_jet_response_binned(yvals, cp_dir=cp_dir, title=_title)
-                plot_met_response_binned(met_data, cp_dir=cp_dir, title=_title)
 
-                mom_data = compute_3dmomentum_and_ratio(yvals)
-                plot_3dmomentum_ratio(mom_data, cp_dir=cp_dir, title=_title, bins=np.linspace(0, 20, 100), logy=True)
-                plot_3dmomentum_ratio(
-                    mom_data, cp_dir=cp_dir, title=_title, bins=np.linspace(0, 2, 100), logy=True, file_modifier="_bins_0_2"
-                )
-                plot_3dmomentum_ratio(
-                    mom_data, cp_dir=cp_dir, title=_title, bins=np.linspace(0, 5, 100), logy=True, file_modifier="_bins_0_5"
-                )
-                plot_3dmomentum_response_binned(mom_data, cp_dir=cp_dir, title=_title)
+            plot_met_ratio(
+                met_data,
+                cp_dir=cp_dir,
+                title=_title,
+                bins=np.linspace(0, 20, 100),
+                logy=True,
+            )
+            plot_met_ratio(
+                met_data,
+                cp_dir=cp_dir,
+                title=_title,
+                bins=np.linspace(0, 2, 100),
+                logy=False,
+                file_modifier="_bins_0_2",
+            )
+            plot_met_ratio(
+                met_data,
+                cp_dir=cp_dir,
+                title=_title,
+                bins=np.linspace(0, 5, 100),
+                logy=False,
+                file_modifier="_bins_0_5",
+            )
+
+            plot_particles(yvals, cp_dir=cp_dir, title=_title)
+
+            #plot_jet_response_binned(yvals, cp_dir=cp_dir, title=_title)
+            #plot_met_response_binned(met_data, cp_dir=cp_dir, title=_title)
+
+            mom_data = compute_3dmomentum_and_ratio(yvals)
+            plot_3dmomentum_ratio(mom_data, cp_dir=cp_dir, title=_title, bins=np.linspace(0, 20, 100), logy=True)
+            plot_3dmomentum_ratio(
+                mom_data, cp_dir=cp_dir, title=_title, bins=np.linspace(0, 2, 100), logy=True, file_modifier="_bins_0_2"
+            )
+            plot_3dmomentum_ratio(
+                mom_data, cp_dir=cp_dir, title=_title, bins=np.linspace(0, 5, 100), logy=True, file_modifier="_bins_0_5"
+            )
+            #plot_3dmomentum_response_binned(mom_data, cp_dir=cp_dir, title=_title)
 
 
 if __name__ == "__main__":

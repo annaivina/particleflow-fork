@@ -10,11 +10,10 @@ from utils_edm import (
 )
 
 import tensorflow_datasets as tfds
-import numpy as np
 
 _DESCRIPTION = """
-CLIC EDM4HEP dataset with ee -> gamma/Z* -> quarks at 380GeV.
-  - X: reconstructed tracks and clusters, variable number N per event
+COCOA EDM4HEP dataset with ttbar with calorimeter clusters.
+  - X: reconstructed tracks and calorimeter clusters, variable number N per event
   - ygen: stable generator particles, zero-padded to N per event
   - ycand: baseline particle flow particles, zero-padded to N per event
 """
@@ -26,27 +25,26 @@ Zenodo. https://doi.org/10.5281/zenodo.8260741
 """
 
 
-class ClicEdmQqPf(tfds.core.GeneratorBasedBuilder):
-    VERSION = tfds.core.Version("1.5.0")
+class CocoaHbbResolveClustersPf(tfds.core.GeneratorBasedBuilder):
+    VERSION = tfds.core.Version("1.7.0")
     RELEASE_NOTES = {
-        "1.0.0": "Initial release.",
-        "1.1.0": "update stats, move to 380 GeV",
-        "1.2.0": "sin cos as separate features",
-        "1.3.0": "Update stats to ~1M events",
-        "1.3.1": "Update stats to ~2M events",
-        "1.4.0": "Fix ycand matching",
+        "0.9.0": "Small stats",
+        "1.0.0": "Initial release",
+        "1.1.0": "Remove track referencepoint feature",
+        "1.2.0": "Keep all interacting genparticles",
         "1.5.0": "Regenerate with ARRAY_RECORD",
+        "1.7.0": "this version is for the cocoa dijet samples"
     }
     MANUAL_DOWNLOAD_INSTRUCTIONS = """
     For the raw input files in ROOT EDM4HEP format, please see the citation above.
 
     The processed tensorflow_dataset can also be downloaded from:
-    rsync -r --progress lxplus.cern.ch:/eos/user/j/jpata/mlpf/clic_edm4hep/ ./
+    FIXME
     """
 
     def __init__(self, *args, **kwargs):
         kwargs["file_format"] = tfds.core.FileFormat.ARRAY_RECORD
-        super(ClicEdmQqPf, self).__init__(*args, **kwargs)
+        super(CocoaHbbResolveClustersPf, self).__init__(*args, **kwargs)
 
     def _info(self) -> tfds.core.DatasetInfo:
         """Returns the dataset metadata."""
@@ -62,10 +60,11 @@ class ClicEdmQqPf(tfds.core.GeneratorBasedBuilder):
                         ),
                         dtype=tf.float32,
                     ),
-                    "ygen": tfds.features.Tensor(shape=(None, len(Y_FEATURES)), dtype=np.float32),
-                    "ycand": tfds.features.Tensor(shape=(None, len(Y_FEATURES)), dtype=np.float32),
+                    "ygen": tfds.features.Tensor(shape=(None, len(Y_FEATURES)), dtype=tf.float32),
+                    "ycand": tfds.features.Tensor(shape=(None, len(Y_FEATURES)), dtype=tf.float32),
                     "file_id": tfds.features.Tensor(shape=(), dtype=tf.int64),  # New field for file_id
-                    "event_id": tfds.features.Tensor(shape=(), dtype=np.int64),  # New field for event_id
+                    "event_id": tfds.features.Tensor(shape=(), dtype=tf.int64),  # New field for event_id
+                    
                 }
             ),
             supervised_keys=None,
