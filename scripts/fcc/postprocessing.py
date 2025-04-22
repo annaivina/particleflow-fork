@@ -454,11 +454,12 @@ def get_genparticles_and_adjacencies(prop_data, hit_data, calohit_links, sitrack
     gp_interacted_with_detector = gp_in_tracker | gp_in_calo
 
     mask_visible = (
-        (gen_features["generatorStatus"] == 1)
-        & (gen_features["PDG"] != 12)
+        #(gen_features["generatorStatus"] == 1)
+        (gen_features["PDG"] != 12)
         & (gen_features["PDG"] != 14)
         & (gen_features["PDG"] != 16)
         & (gen_features["energy"] > 0.01)
+        & (np.abs(gen_features["eta"]) < 4)
         & gp_interacted_with_detector
     )
 
@@ -703,7 +704,7 @@ def get_feature_matrix(feature_dict, features):
     return feats.T
 
 
-def process_one_file(fn, ofn):
+def process_one_file(file_number,fn, ofn):
 
     # output exists, do not recreate
     if os.path.isfile(ofn):
@@ -848,6 +849,7 @@ def process_one_file(fn, ofn):
         sanitize(ygen_cluster)
         sanitize(ycand_track)
         sanitize(ycand_cluster)
+        print("saving filenumber" + str(file_number))
 
         this_ev = awkward.Record(
             {
@@ -857,6 +859,8 @@ def process_one_file(fn, ofn):
                 "ygen_cluster": ygen_cluster,
                 "ycand_track": ycand_track,
                 "ycand_cluster": ycand_cluster,
+                "file_id": int(file_number),
+                "event_id": int(iev),
             }
         )
         ret.append(this_ev)
@@ -880,12 +884,13 @@ def process_sample(sample):
     args = []
     for inf in infiles:
         of = inf.replace(inpath_samp, outpath_samp).replace(".root", ".parquet")
-        args.append((inf, of))
+        file_number = os.path.basename(inf).split('_')[-1].replace(".root", "")
+        args.append((file_number,inf, of))
     pool.starmap(process_one_file, args)
 
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:
         process_sample(sys.argv[1])
-    else:
-        process_one_file(sys.argv[1], sys.argv[2])
+    if len(sys.argv) == 4:
+        process_one_file(sys.argv[1],sys.argv[2], sys.argv[3])
